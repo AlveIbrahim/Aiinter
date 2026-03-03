@@ -30,11 +30,20 @@ Rules:
 
 Example format: ["Question 1?", "Question 2?", ...]`;
 
-  const response = await openai.chat.completions.create({
-    model: "openai/gpt-4o-mini",
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0.7,
-  });
+  let response;
+  try {
+    response = await openai.chat.completions.create({
+      model: "openai/gpt-3.5-turbo",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.7,
+    });
+  } catch (err: any) {
+    console.error("OpenAI/OpenRouter Error:", err);
+    return NextResponse.json(
+      { error: "AI service error: " + (err.message || "Unknown error") },
+      { status: err.status || 500 }
+    );
+  }
 
   let questions: string[] = [];
   try {

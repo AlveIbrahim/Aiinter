@@ -42,8 +42,8 @@ export default function InterviewRoom() {
   const [answers, setAnswers] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const recognitionRef = useRef<{ stop: () => void } | null>(null);
+  const currentQuestion = questions[currentIndex];
+  const recognitionRef = useRef<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const interimRef = useRef("");
 
@@ -90,19 +90,29 @@ export default function InterviewRoom() {
             numQuestions: iv.num_questions,
           }),
         });
-        const data = await res.json();
+
+        const data = await res.json().catch(() => ({ error: "Response body is not JSON" }));
+
         if (!res.ok) {
-          toast.error("Failed to generate questions: " + data.error);
+          toast.error("Failed to generate questions: " + (data.error || "Unknown error"));
           setIsGenerating(false);
           return;
         }
+
         // Re-fetch from DB to get IDs
         const { data: qs } = await supabase
           .from("interview_questions")
           .select("*")
           .eq("interview_id", id)
           .order("question_order");
-        setQuestions(qs ?? []);
+        
+        if (!qs || qs.length === 0) {
+          toast.error("Failed to retrieve generated questions.");
+          setIsGenerating(false);
+          return;
+        }
+
+        setQuestions(qs);
         setIsGenerating(false);
         setPhase("ready");
       }
@@ -146,60 +156,66 @@ export default function InterviewRoom() {
     }
   }, []);
 
+  const stopAudio = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+  }, []);
+
   // ── Start listening via Web Speech API ──────────────────────────
   const startListening = useCallback(() => {
-    type SpeechRecognitionCtor = new () => {
-      continuous: boolean;
-      interimResults: boolean;
-      lang: string;
-      start: () => void;
-      stop: () => void;
-      onresult: ((event: {
-        resultIndex: number;
-        results: { isFinal: boolean; [k: number]: { transcript: string } }[];
-      }) => void) | null;
-      onerror: (() => void) | null;
-    };
-    const SpeechRecognitionAPI: SpeechRecognitionCtor | undefined =
-      (window as unknown as { SpeechRecognition?: SpeechRecognitionCtor }).SpeechRecognition ??
-      (window as unknown as { webkitSpeechRecognition?: SpeechRecognitionCtor }).webkitSpeechRecognition;
+    if (typeof window === "undefined") return;
+    
+    const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognitionAPI) {
-      toast.error("Speech recognition not supported in this browser. Please use Chrome.");
+      toast.error("Speech recognition not supported in this browser.");
       return;
     }
-
     const recognition = new SpeechRecognitionAPI();
-    recognition.continuous = true;
-    recognition.interimResults = true;
+    recognitionRef.current = recognition;
     recognition.lang = "en-US";
+    recognition.interimResults = true;
+    recognition.continuous = true;
 
-    interimRef.current = "";
+    recognition.onstart = () => {
+      setPhase("listening");
+      setTranscript("");
+      interimRef.current = "";
+    };
 
-    recognition.onresult = (event: {
-      resultIndex: number;
-      results: { isFinal: boolean; [k: number]: { transcript: string } }[];
-    }) => {
+    recognition.onresult = (event: any) => {
+      let final = "";
       let interim = "";
-      let final = interimRef.current;
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i];
-        if (result.isFinal) {
-          final += result[0].transcript + " ";
-        } else {
-          interim = result[0].transcript;
+        if (event.results[i].isFinal) final += event.results[i][0].transcript;
+        else interim += event.results[i][0].transcript;
+      }
+      if (final) setTranscript((prev) => prev + (prev ? " " : "") + final);
+      interimRef.current = interim;
+    };
+
+    recognition.onerror = (event: any) => {
+      if (event.error !== "no-speech") {
+        console.error("Speech Error:", event.error);
+        toast.error("Microphone error: " + event.error);
+      }
+    };
+
+    recognition.onend = () => {
+      // Auto-restart if we're still in listening phase and recognition still exists
+      if (phase === "listening" && recognitionRef.current) {
+        try {
+          recognition.start();
+        } catch (err) {
+          console.error("Failed to restart speech recognition:", err);
         }
       }
-      interimRef.current = final;
-      setTranscript(final + interim);
     };
 
-    recognition.onerror = () => {
-      // Ignore errors, keep going
-    };
-
-    recognitionRef.current = recognition;
     recognition.start();
-  }, []);
+  }, [phase]);
 
   const stopListening = useCallback(() => {
     recognitionRef.current?.stop();
@@ -219,15 +235,17 @@ export default function InterviewRoom() {
 
   // ── Submit answer for current question ──────────────────────────
   async function submitAnswer() {
+    if (!currentQuestion) return;
     const answer = interimRef.current.trim() || transcript.trim();
     if (!answer) {
       toast.error("Please say your answer first.");
       return;
     }
     stopListening();
+    stopAudio();
     setPhase("processing");
 
-    const currentQ = questions[currentIndex];
+    const currentQ = currentQuestion;
     const newAnswers = [...answers, answer];
     setAnswers(newAnswers);
 
@@ -256,8 +274,10 @@ export default function InterviewRoom() {
 
   // ── Skip question ────────────────────────────────────────────────
   async function skipQuestion() {
+    if (!currentQuestion) return;
     stopListening();
-    const currentQ = questions[currentIndex];
+    stopAudio();
+    const currentQ = currentQuestion;
     const newAnswers = [...answers, ""];
     setAnswers(newAnswers);
     await supabase
@@ -277,16 +297,18 @@ export default function InterviewRoom() {
     }
   }
 
-  const currentQuestion = questions[currentIndex];
   const progress = questions.length > 0 ? ((currentIndex) / questions.length) * 100 : 0;
 
   // ── UI ────────────────────────────────────────────────────────────
-  if (phase === "loading" || isGenerating) {
+  const isLoading = phase === "loading" || isGenerating || questions.length === 0 || !currentQuestion;
+  const isActionDisabled = phase === "processing" || phase === "loading" || isLoading;
+
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-4">
         <Loader2 className="h-10 w-10 text-primary animate-spin" />
-        <p className="text-muted-foreground">
-          {isGenerating ? "Generating your interview questions…" : "Loading interview…"}
+        <p className="text-muted-foreground text-center px-6">
+          {isGenerating ? "Generating your interview questions…" : questions.length === 0 && phase !== "loading" ? "Initializing interview session..." : "Loading interview…"}
         </p>
       </div>
     );
@@ -402,14 +424,14 @@ export default function InterviewRoom() {
             variant="ghost"
             size="sm"
             onClick={skipQuestion}
-            disabled={phase === "processing" || phase === "speaking" || phase === "loading"}
+            disabled={isActionDisabled}
             className="text-muted-foreground"
           >
             Skip question
           </Button>
 
           <div className="flex gap-3">
-            {phase === "ready" && (
+            {phase === "ready" && currentQuestion && (
               <Button onClick={() => speakQuestion(currentQuestion.question)} variant="outline" className="gap-2">
                 <Volume2 className="h-4 w-4" />
                 Start answering

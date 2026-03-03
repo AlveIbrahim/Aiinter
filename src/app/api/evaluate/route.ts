@@ -65,7 +65,7 @@ Evaluate strictly and fairly. Respond in this EXACT JSON format (no markdown, no
 
     try {
       const response = await openai.chat.completions.create({
-        model: "openai/gpt-4o-mini",
+        model: "openai/gpt-3.5-turbo",
         messages: [{ role: "user", content: prompt }],
         temperature: 0.3,
       });

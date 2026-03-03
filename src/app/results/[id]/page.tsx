@@ -166,12 +166,15 @@ export default function ResultsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ interviewId: id }),
       });
-      const data = await res.json();
+
+      const data = await res.json().catch(() => ({ error: "Response body is not JSON" }));
+
       if (!res.ok) {
-        toast.error("Failed to evaluate: " + data.error);
+        toast.error("Failed to evaluate: " + (data.error || "Unknown error"));
         setLoading(false);
         return;
       }
+
       setResults(data.results);
       setOverallScore(data.overallScore);
       setLoading(false);
