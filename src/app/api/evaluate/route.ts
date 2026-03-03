@@ -2,17 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { createClient } from "@/lib/supabase/server";
 
-const openai = new OpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY,
-  defaultHeaders: {
-    "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000",
-    "X-Title": "MockMind",
-  },
-});
-
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
+  const openai = new OpenAI({
+    baseURL: "https://openrouter.ai/api/v1",
+    apiKey: process.env.OPENROUTER_API_KEY,
+    defaultHeaders: {
+      "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000",
+      "X-Title": "MockMind",
+    },
+  });
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -66,7 +65,7 @@ Evaluate strictly and fairly. Respond in this EXACT JSON format (no markdown, no
 
     try {
       const response = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
+        model: "openai/gpt-4o-mini",
         messages: [{ role: "user", content: prompt }],
         temperature: 0.3,
       });

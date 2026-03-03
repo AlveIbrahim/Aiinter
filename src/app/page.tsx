@@ -28,7 +28,7 @@ export default function LandingPage() {
           <div className="flex items-center gap-3 group">
             <div className="relative">
               <div className="absolute inset-0 bg-primary/20 blur-md rounded-full group-hover:bg-primary/40 transition-all"></div>
-              <Terminal className="relative h-6 w-6 text-primary animate-pulse" />
+              <Brain className="relative h-6 w-6 text-primary animate-pulse" />
             </div>
             <span className="text-xl font-bold tracking-tighter text-glow">
               MOCK_MIND<span className="animate-cursor-blink">_</span>
